@@ -1,5 +1,5 @@
 # NeuralNetworkToConstraints
-Convert a neural network to a set of constraints
+Convert a neural network to a set of constraints (https://arxiv.org/abs/1712.06174)
 
 The goal here is: Given a ReLU neural network, convert it to a set of constraints to be used in a MILP formulation.
 
