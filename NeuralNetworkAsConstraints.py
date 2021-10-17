@@ -8,7 +8,7 @@ class NeuralNetworkConstraints():
     C = 'C'
     B = 'B'
     
-    def __init__( self, weights, bias  ):
+    def __init__( self, weights, bias, prefix ):
         self.weights = weights
         self.bias = bias
         self.nrInputs = self.weights[0].shape[0]
@@ -19,7 +19,12 @@ class NeuralNetworkConstraints():
         self.Slack = 'Slack'
         self.Binary = 'Binary'
         self.Output = ['Output'+str(i) for i in range(self.nrOutputs)]
+        self.inputDetail = 'Input'
+        self.outputDetail = 'Output'
+        self.intermediateDetail = 'Intermediate'
+        self.slackDetail = 'Slack'
         self.M = 1000
+        self.prefix = prefix #to add to constraint names
         
         
         #variables
@@ -30,6 +35,8 @@ class NeuralNetworkConstraints():
         self._outputvars = {}
         self._binvars = {}
         
+        
+    def buildProblem(self):
         #call the methods to build the constraints and variables
         self.createInputVars()
         self.createOutputVars()
@@ -41,17 +48,18 @@ class NeuralNetworkConstraints():
         stage = 0
         for i in range(self.nrInputs):
             inputName = self.Input[i]
-            name = NeuralNetworkConstraints.Name(inputName,stage,i)
-            var = nn.Variable(name,self.C)
+            name = self.Name(inputName)
+            var = nn.Variable(name, self.C, self.inputDetail)
             self.variables[var.name] = var
+            
     def createOutputVars(self):
         outputWeight = self.weights[-1]
         stage = self.NrLayers + 1
         
         for idx,row in enumerate(outputWeight.transpose()):
             outputName = self.Output[idx]
-            name = NeuralNetworkConstraints.Name(outputName,stage,idx)
-            var = nn.Variable(name,self.C)
+            name = self.Name( outputName )
+            var = nn.Variable(name,self.C,self.outputDetail)
             self.variables[var.name] = var
         
     def createIntermediateVars(self):
@@ -61,13 +69,13 @@ class NeuralNetworkConstraints():
             #shouldnt be needed to enumerate A
             for idx,row in enumerate(A):
                 #continuous, slack, and binary
-                name = NeuralNetworkConstraints.Name(self.Intermediate, stage, idx)
-                var = nn.Variable(name,self.C,0)
+                name = self.Name( self.Intermediate, stage, idx )
+                var = nn.Variable(name,self.C,self.intermediateDetail,0)
                 self.variables[var.name] = var
-                name = NeuralNetworkConstraints.Name(self.Slack, stage, idx)
-                var = nn.Variable(name,self.C,0)
+                name = self.Name( self.Slack, stage, idx )
+                var = nn.Variable(name,self.C,self.slackDetail,0)
                 self.variables[var.name] = var
-                name = NeuralNetworkConstraints.Name(self.Binary,stage,idx)
+                name = self.Name( self.Binary, stage, idx )
                 var = nn.Variable(name,self.B)
                 self.variables[var.name] = var
     
@@ -77,33 +85,34 @@ class NeuralNetworkConstraints():
             b = self.bias[layer]
             stage = layer + 1
             for idx,row in enumerate(A):
-                name = NeuralNetworkConstraints.Name('Layer',stage,idx)
-                con = nn.Constraint(name, '=', b[idx])
+                name = self.Name( 'layer', stage, idx )
+                con = nn.Constraint(name, '=', b[idx] )
                 self.addConstraint(con)
-                lhsNameIntermediate = NeuralNetworkConstraints.Name(self.Intermediate,stage,idx)
+                lhsNameIntermediate = self.Name(self.Intermediate,stage,idx)
                 self.addVariableToConstraint(lhsNameIntermediate, 1.0, con)
-                lhsNameSlack = NeuralNetworkConstraints.Name(self.Slack,stage,idx)
+                lhsNameSlack = self.Name(self.Slack,stage,idx)
                 self.addVariableToConstraint(lhsNameSlack, -1.0, con)
                 
                 for colIdx,col in enumerate(row):
                     #getting variables from previous stage
                     if stage == 1:
                         varname = self.Input[colIdx]
+                        varname = self.Name( self.Input[colIdx] )
                     else:
                         varname = self.Intermediate
-                    varname = NeuralNetworkConstraints.Name( varname, layer, colIdx )
+                        varname = self.Name( varname, layer, colIdx )
                     self.addVariableToConstraint(varname, -col, con)
                         
                 #sandwich constraint
-                binvarname = NeuralNetworkConstraints.Name(self.Binary,stage,idx)
+                binvarname = self.Name(self.Binary,stage,idx)
                 #for intermediate
-                name = NeuralNetworkConstraints.Name('IntermediateSandwich',stage,idx)
+                name = self.Name(self.Intermediate + 'Sandwich',stage,idx)
                 con = nn.Constraint(name,'<=',0)
                 self.addVariableToConstraint(lhsNameIntermediate, 1.0, con)
                 self.addVariableToConstraint(binvarname, -self.M, con)
                 self.addConstraint(con)
                 #for slack
-                name = NeuralNetworkConstraints.Name('SlackSandwich',stage,idx)
+                name = self.Name( self.Slack + 'Sandwich',stage,idx)
                 con = nn.Constraint(name,'<=',self.M)
                 self.addVariableToConstraint(lhsNameSlack, 1.0, con)
                 self.addVariableToConstraint(binvarname, self.M, con)
@@ -115,29 +124,33 @@ class NeuralNetworkConstraints():
         layer = self.NrLayers
         stage = self.NrLayers + 1
         for idx,row in enumerate(A):
-            name = NeuralNetworkConstraints.Name('Output',stage,idx)
+            name = self.Name(self.Output[idx],stage,idx)
             con = nn.Constraint(name, '=', b[idx])
             self.addConstraint(con)
-            outputName = NeuralNetworkConstraints.Name(self.Output[idx],stage,idx)
+            outputName = self.Output[idx]
             self.addVariableToConstraint(outputName, 1.0, con)
             
             for colIdx,col in enumerate(row):
                 #getting variables from previous stage
                 varname = self.Intermediate
-                varname = NeuralNetworkConstraints.Name( varname,layer, colIdx )
+                varname = self.Name( varname,layer, colIdx )
                 self.addVariableToConstraint(varname, -col, con)
-            
-    @staticmethod
-    def Name( name, stage, idx ):
-        return name + '_(' + str(stage) + ',' + str(idx) + ')'
+           
+       
+    def Name( self, name = '', stage = '', idx = '' ):
+        #input variables dont have stage/idx
+        if( stage != '' ):
+            return self.prefix + name + '_(' + str(stage) + ',' + str(idx) + ')'
+        else:
+            return name
        
     def getVariable(self,name):
         var = self.variables[name]
         return var
     
     def addVariableToConstraint(self,varname,coef,con):
-        var = self.variables[varname]
-        con.addVariable(var,coef)
+        var = self.variables[ varname ]
+        con.addVariable( var, coef )
         
     def addConstraint(self,con):
         self.constraints.append(con)
@@ -153,10 +166,14 @@ class NeuralNetworkConstraints():
     def setIntermediateName( self, name ):
         self.Intermediate = name
         
+    def setSlackName( self, name):
+        self.Slack = name
+        
+    def setBinaryName( self, name ):
+        self.Binary = name
+        
     def setM( self, M ):
         self.M = M
-        
-        
         
 if __name__ == '__main__':
     # nnproblem = NeuralNetworkConstraints(classifier.coefs_,classifier.intercepts_)
